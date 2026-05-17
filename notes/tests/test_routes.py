@@ -22,9 +22,7 @@ class TestRoutes(TestCase):
             author=cls.author,
         )
 
-    # === Публичные страницы (доступны всем, даже анонимам) ===
     def test_public_pages_availability(self):
-        """Главная, логин, регистрация – доступны без авторизации."""
         public_urls = (
             ('notes:home', None),
             ('users:login', None),
@@ -36,28 +34,43 @@ class TestRoutes(TestCase):
                 response = self.client.get(url)
                 self.assertEqual(response.status_code, HTTPStatus.OK)
 
-    # === Страница деталей заметки – доступна только автору ===
+    def test_protected_pages_availability_for_authenticated(self):
+        protected_urls = (
+            ('notes:list', None),
+            ('notes:add', None),
+            ('notes:success', None),
+        )
+        # Анонимный пользователь → редирект на логин
+        for name, args in protected_urls:
+            with self.subTest(name=f'anonymous_{name}'):
+                url = reverse(name, args=args)
+                redirect_url = f'{reverse("users:login")}?next={url}'
+                response = self.client.get(url)
+                self.assertRedirects(response, redirect_url)
+
+        # Авторизованный пользователь → 200
+        self.client.force_login(self.author)
+        for name, args in protected_urls:
+            with self.subTest(name=f'authenticated_{name}'):
+                url = reverse(name, args=args)
+                response = self.client.get(url)
+                self.assertEqual(response.status_code, HTTPStatus.OK)
+
     def test_detail_page_availability(self):
-        """Аноним → редирект на логин, автор → 200, другой пользователь → 404."""
         url = reverse('notes:detail', args=(self.note.slug,))
-
-        # Анонимный пользователь
-        response = self.client.get(url)
         login_url = reverse('users:login')
-        redirect_url = f'{login_url}?next={url}'
-        self.assertRedirects(response, redirect_url)
 
-        # Автор заметки
+        response = self.client.get(url)
+        self.assertRedirects(response, f'{login_url}?next={url}')
+
         self.client.force_login(self.author)
         response = self.client.get(url)
         self.assertEqual(response.status_code, HTTPStatus.OK)
 
-        # Другой авторизованный пользователь
         self.client.force_login(self.reader)
         response = self.client.get(url)
         self.assertEqual(response.status_code, HTTPStatus.NOT_FOUND)
 
-    # === Редактирование/удаление – только автору ===
     def test_edit_delete_availability(self):
         users_statuses = (
             (self.author, HTTPStatus.OK),
@@ -71,7 +84,6 @@ class TestRoutes(TestCase):
                     response = self.client.get(url)
                     self.assertEqual(response.status_code, status)
 
-    # === Редирект анонима при попытке редактировать/удалить ===
     def test_redirect_for_anonymous_client(self):
         login_url = reverse('users:login')
         for name in ('notes:edit', 'notes:delete'):
